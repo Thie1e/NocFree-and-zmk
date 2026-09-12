@@ -42,6 +42,28 @@ config NOCFREE_KSCAN_PCA9555_PRIORITY
 
 endif # NOCFREE_KSCAN_PCA9555
 
+config NOCFREE_SCALED_LED
+    bool "Per-device brightness scale in front of another LED device"
+    default y
+    depends on DT_HAS_NOCFREE_SCALED_LED_ENABLED
+    select LED
+    help
+      Forward LED brightness to another LED device with a fixed multiplier.
+
+      ZMK sends one brightness value to every half of a split keyboard. The two
+      halves of this board do not reach the same brightness at the same duty, so
+      the per-half correction is applied in the LED device instead.
+
+if NOCFREE_SCALED_LED
+
+config NOCFREE_SCALED_LED_INIT_PRIORITY
+    int "Scaled LED init priority"
+    default 99
+    help
+      Must be later than CONFIG_LED_INIT_PRIORITY so the target device exists.
+
+endif # NOCFREE_SCALED_LED
+
 config NOCFREE_RECOVERY_CDC_1200_TOUCH
     bool "Enter the preserved UF2 bootloader when CDC baud is set to 1200"
     default y
@@ -54,3 +76,16 @@ config NOCFREE_RECOVERY_CDC_1200_TOUCH
       half whose key triggered it and, for a split peripheral, needs a working
       split link -- this path only needs USB, so it recovers a half no matter
       what state its radio or pairing is in.
+
+config NOCFREE_BEHAVIOR_BATTERY_REPORT
+    bool "Type the battery level out as keystrokes"
+    default y
+    depends on DT_HAS_NOCFREE_BEHAVIOR_BATTERY_REPORT_ENABLED
+    depends on ZMK_BATTERY_REPORTING
+    help
+      Bind this to a key to have the battery percentage typed as "bat NN".
+
+      USB HID has no battery channel, so a level published as a BLE service is
+      measured but invisible to a host on a cable. The factory firmware typed
+      it out for the same reason. A ZMK macro cannot do this: macros send a
+      sequence fixed at compile time, and the percentage is a runtime value.

@@ -12,7 +12,10 @@
      * unpopulated expander bits are excluded simply by being absent -- there is
      * no separate "ignore" table to keep in sync.
      *
-     * This half owns global keymap positions 0-36, so its columns need no offset.
+     * This half owns global keymap positions 0-37, so its columns need no offset.
+     *
+     * The shift row carries seven inputs on ISO rather than ANSI's six: the
+     * extra NON_US_BSLH key sits between LSHFT and Z. See docs/iso-de.md.
      *
      * Timing budget at 100 kHz: one two-byte port-pair read costs roughly
      * 480 us, so a three-expander scan costs roughly 1.5 ms. The active period
@@ -39,13 +42,75 @@
             <&pca22 0>, <&pca22 1>, <&pca22 2>, <&pca22 3>, <&pca22 4>, <&pca22 5>,
             /* Home row: pca22 port 1, columns 20-25 */
             <&pca22 8>, <&pca22 9>, <&pca22 10>, <&pca22 11>, <&pca22 12>, <&pca22 13>,
-            /* Shift row: pca24 port 0, columns 26-31 */
+            /* Shift row: pca24 port 0, columns 26-32 (ISO: seven inputs) */
             <&pca24 0>, <&pca24 1>, <&pca24 2>, <&pca24 3>, <&pca24 4>, <&pca24 5>,
-            /* Bottom row: pca24 port 1, columns 32-36 */
+            <&pca24 6>,
+            /* Bottom row: pca24 port 1, columns 33-37 */
             <&pca24 8>, <&pca24 9>, <&pca24 10>, <&pca24 11>, <&pca24 12>;
+    };
+
+    /*
+     * Battery measurement. Step 1 of the battery plan: prove the ADC reads
+     * something that moves the right way before anything is built on top of it.
+     *
+     * Section 4.1 of the porting guide publishes the pins: the ADC is D15 = P0.04,
+     * which is AIN2, and the divider enable is D16 = P0.05, active high. Note the
+     * enable line is the one pin that differs between the halves (P0.31 on the
+     * right), which is why this node is here and not in the shared .dtsi.
+     *
+     * io-channels takes the bare AIN number: battery_voltage_divider.c computes
+     * `AnalogInput0 + channel` itself, so a NRF_SAADC_AIN2 constant here would
+     * select the wrong input.
+     *
+     * The ohms encode the divider ratio; the driver only ever uses full/output.
+     *
+     * NOT CALIBRATED. This ratio is a guess and the readout it produces is a
+     * stub -- on the unit it was written for it reads 100 % permanently and has
+     * never been seen to fall. Read docs/battery.md before changing it.
+     *
+     * The short version: the guide's 130/100 read 26 % on a full battery, so
+     * 4200/2801 = 1.500 was derived from that one observation and put in here.
+     * But lithium_ion_mv_to_pct() clamps at 4200 mV, which a 1.5 ratio reaches
+     * at only 2.80 V on the pin -- and a cell on a charger sits above that. The
+     * single anchor point was taken at the top of the range, where a saturated
+     * reading and a correct one look identical.
+     *
+     * The measurement path itself is fine: the SAADC reads, the enable line
+     * switches, the value gets typed. Only the scaling is unresolved. Fixing it
+     * needs a second anchor near empty, and probably a real discharge curve
+     * instead of ZMK's linear lithium_ion_mv_to_pct(). Nobody is doing that.
+     *
+     * The driver drives the enable line high before sampling and low afterwards,
+     * which is what section 5 requires to avoid continuous divider current; it
+     * also configures 12-bit resolution, oversampling and calibration itself.
+     */
+    vbatt: vbatt {
+        compatible = "zmk,battery-voltage-divider";
+        io-channels = <&adc 2>;
+        power-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
+        output-ohms = <100>;
+        full-ohms = <150>;
+    };
+
+    chosen {
+        zmk,battery = &vbatt;
     };
 };
 
-&ansi_layout {
+&iso_layout {
     kscan = <&kscan0>;
+};
+
+/*
+ * Backlight brightness scale for this half -- the left half is much the brighter
+ * of the two, so it is turned right down. With the keymap's BL_SET 100 this
+ * number *is* the duty in percent, so it tunes in 1 % steps.
+ *
+ * It is also what sets the whine: the audible complaint appeared at 1 %, where
+ * the pulse is only 10 us long. A longer duty is a gentler excitation, so this
+ * is the knob for the noise as well as the brightness -- they pull against each
+ * other. See docs/backlight.md.
+ */
+&backlight {
+    scale-percent = <25>;
 };

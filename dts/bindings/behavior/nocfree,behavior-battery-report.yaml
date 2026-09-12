@@ -1,0 +1,22 @@
+# Copyright (c) 2026 The NocFree ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Types the battery state of charge out as keystrokes.
+
+  USB HID has no battery channel, so a level published over BLE is invisible
+  to a host on a cable. This types it instead, as "bat NN".
+
+  Output is restricted to digits, letters and space, which occupy the same
+  positions on ANSI and German ISO; punctuation is not layout-stable.
+
+compatible: "nocfree,behavior-battery-report"
+
+include: zero_param.yaml
+
+properties:
+  tap-ms:
+    type: int
+    default: 15
+    description: |
+      Milliseconds between the queued taps. Matches ZMK's macro default.
