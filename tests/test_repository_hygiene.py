@@ -29,11 +29,17 @@ def tracked_files() -> list[Path]:
     return [ROOT / name for name in out]
 
 
+def is_documentation_image(path: Path) -> bool:
+    """A photo under docs/img/, the one exemption from the no-binaries rule."""
+    rel = path.relative_to(ROOT) if path.is_absolute() else path
+    return rel.parts[:2] == ("docs", "img")
+
+
 def candidate_files() -> list[Path]:
     """Tracked files plus anything new in the working tree, minus ignored paths."""
-    tracked = set(tracked_files())
+    tracked = {p for p in tracked_files() if not is_documentation_image(p)}
     for path in ROOT.rglob("*"):
-        if not path.is_file():
+        if not path.is_file() or is_documentation_image(path):
             continue
         rel = path.relative_to(ROOT)
         if rel.parts[0] in {".git", ".jig", "__pycache__"}:
@@ -102,13 +108,35 @@ class NoPrivateDataTest(unittest.TestCase):
 
     def test_no_binaries_or_build_output_are_tracked(self):
         for path in tracked_files():
+            if is_documentation_image(path):
+                continue
             with self.subTest(str(path.relative_to(ROOT))):
                 self.assertNotIn(path.suffix, BINARY_SUFFIXES)
 
     def test_every_tracked_file_is_text(self):
         for path in tracked_files():
+            if is_documentation_image(path):
+                continue
             with self.subTest(str(path.relative_to(ROOT))):
                 self.assertNotIn(b"\x00", path.read_bytes())
+
+    def test_documentation_images_stay_small_and_in_their_place(self):
+        """docs/img/ is the one place a binary may live, and only for photos.
+
+        The blanket no-binaries rule exists to keep vendor firmware and build
+        output out of the repository, not to ban a picture of the keyboard. So
+        the exemption is deliberately narrow: one directory, image suffixes
+        only, and a size cap -- git stores every revision of a binary forever,
+        so a few large photos are a permanent cost on every clone.
+        """
+        allowed = {".jpg", ".jpeg", ".png"}
+        for path in tracked_files():
+            if not is_documentation_image(path):
+                continue
+            rel = str(path.relative_to(ROOT))
+            with self.subTest(rel):
+                self.assertIn(path.suffix.lower(), allowed)
+                self.assertLess(path.stat().st_size, 1_000_000, f"{rel} is over 1 MB")
 
     def test_no_vendor_firmware_or_capture_is_present(self):
         for path in candidate_files():
@@ -174,6 +202,41 @@ class FormattingTest(unittest.TestCase):
                     limit = 130 if path.suffix in allowance else 100
                 with self.subTest(f"{path.relative_to(ROOT)}:{number}"):
                     self.assertLessEqual(len(line), limit)
+
+
+class PublicationTest(unittest.TestCase):
+    """Invariants that only matter because this fork is published."""
+
+    PLACEHOLDER = "YOUR-GITHUB-USERNAME"
+
+    def test_the_attribution_placeholder_was_filled_in(self):
+        """README credits an owner. Until someone sets it, it says so loudly.
+
+        This fails on purpose in a fresh checkout: publishing with the
+        placeholder intact would attribute the work to a username that does
+        not exist. Replace it in README.md before pushing.
+        """
+        for path in candidate_files():
+            if path.name == "test_repository_hygiene.py":
+                continue  # this file necessarily contains the placeholder
+            with self.subTest(str(path.relative_to(ROOT))):
+                self.assertNotIn(self.PLACEHOLDER, path.read_text(errors="replace"))
+
+    def test_the_fork_says_what_it_is(self):
+        """A reader landing on the README must learn, above the fold, that
+        this is not official NocFree firmware and that flashing it is at
+        their own risk. Upstream's disclaimer is far below the fold."""
+        text = (ROOT / "README.md").read_text()
+        head = " ".join(text[: text.index("\n---")].replace("**", "").split())
+        self.assertIn("not official NocFree firmware", head)
+        self.assertIn("NocFreeKB/NocFree-and-zmk", head)
+
+    def test_agent_instructions_are_one_file(self):
+        """AGENTS.md is the source; CLAUDE.md is a symlink to it. Two real
+        files drift apart and then contradict each other."""
+        claude = ROOT / "CLAUDE.md"
+        self.assertTrue(claude.is_symlink(), "CLAUDE.md must be a symlink")
+        self.assertEqual(claude.readlink().name, "AGENTS.md")
 
 
 class UpstreamReadmeTest(unittest.TestCase):

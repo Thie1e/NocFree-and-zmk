@@ -42,6 +42,20 @@ def property_value(text: str, node: str, prop: str) -> str | None:
     return found.group(1).strip() if found else None
 
 
+def _layer_bindings(keymap, layer):
+    """Split one layer's bindings into individual behaviour invocations."""
+    match = re.search(layer + r"\s*\{.*?bindings = <(.*?)>;", keymap, re.S)
+    if match is None:
+        raise AssertionError("layer not found: " + layer)
+
+    out = []
+    for part in re.split(r"(?=&)", match.group(1)):
+        part = part.strip()
+        if part:
+            out.append(" ".join(part.split()))
+    return out
+
+
 class KeyInputTest(unittest.TestCase):
     """The exact expander bit each ANSI position is wired to."""
 
@@ -126,9 +140,39 @@ class KeymapTest(unittest.TestCase):
 
     def test_recovery_and_output_bindings_are_reachable(self):
         function = self.layers()["function_layer"]
-        for binding in ("bootloader", "sys_reset", "out OUT_USB", "out OUT_BLE", "bt BT_CLR"):
+        for binding in ("boot_reset 0 0", "out OUT_USB", "out OUT_BLE", "bt BT_CLR"):
             with self.subTest(binding):
                 self.assertIn(binding, function)
+
+    def test_an_absolute_brightness_binding_exists(self):
+        """ZMK relays the backlight behaviour to the peripheral but never
+        synchronises the state, and BL_INC/BL_DEC are relative -- so a single
+        lost relay leaves the two halves permanently unequal. Only BL_SET
+        lands both on the same number. See docs/backlight.md."""
+        bindings = [b for layer in self.layers().values() for b in layer]
+        absolute = [b for b in bindings if b.startswith("bl BL_SET")]
+        self.assertTrue(absolute, "no &bl BL_SET binding: brightness cannot be resynced")
+        self.assertIn("bl BL_SET 0", absolute)
+        self.assertTrue(any(b != "bl BL_SET 0" for b in absolute),
+                        "an off-level alone cannot turn the backlight on")
+
+    def test_each_half_can_reach_its_own_bootloader(self):
+        """A reset behaviour only ever acts on the half whose key ran it, so
+        every half needs its own. Tap resets, hold reaches the bootloader."""
+        keymap = read(BOARD / "nocfree_and.keymap")
+        self.assertIn('compatible = "zmk,behavior-hold-tap";', keymap)
+        self.assertIn("bindings = <&bootloader>, <&sys_reset>;", keymap)
+        self.assertIn("tapping-term-ms = <1500>;", keymap)
+
+        function = self.layers()["function_layer"]
+        left = [function[i] for i, p in enumerate(spec.TRANSFORM)
+                if p < spec.RIGHT_COL_OFFSET]
+        right = [function[i] for i, p in enumerate(spec.TRANSFORM)
+                 if p >= spec.RIGHT_COL_OFFSET]
+        with self.subTest("left"):
+            self.assertIn("boot_reset 0 0", left)
+        with self.subTest("right"):
+            self.assertIn("boot_reset 0 0", right)
 
     def test_a_function_key_exists_on_both_halves(self):
         """Bluetooth pairing and recovery are only reachable through Fn."""
@@ -321,14 +365,83 @@ class RoleTest(unittest.TestCase):
                 self.assertIn("CONFIG_CLOCK_CONTROL_NRF_K32SRC_RC=y", text)
                 self.assertNotIn("K32SRC_XTAL", text)
 
+    def test_backlight_drives_only_the_factory_pin(self):
+        """The backlight is the one output this port drives, on the published
+        pin: P0.20, one PWM channel, non-inverted -- the drive is active high,
+        established on hardware. See docs/backlight.md."""
+        pinctrl = read(BOARD / "nocfree_and-pinctrl.dtsi")
+        self.assertIn("NRF_PSEL(PWM_OUT0, 0, 20)", pinctrl)
+
+        dtsi = read(BOARD / "nocfree_and.dtsi")
+        self.assertIn("zmk,backlight = &backlight;", dtsi)
+        # The period is a tuning knob with its own test below; pin the
+        # channel and the polarity here, not the number.
+        self.assertRegex(dtsi, r"pwms = <&pwm0 0 PWM_\w+\(\d+\) PWM_POLARITY_NORMAL>;")
+        # One channel only: the factory driver disconnects PSEL.OUT[1..3].
+        self.assertEqual(dtsi.count("pwms = <"), 1)
+
+        for name in BOARD.glob("*_defconfig"):
+            config = name.read_text()
+            with self.subTest(name.name):
+                self.assertIn("CONFIG_ZMK_BACKLIGHT=y", config)
+                # Never bright at boot: an unverified polarity must not be
+                # able to sit at full duty on battery.
+                self.assertIn("CONFIG_ZMK_BACKLIGHT_ON_START=n", config)
+
+    def test_the_backlight_pwm_stays_slow_enough_to_dim(self):
+        """Raising the PWM rate raises the brightness floor on this hardware.
+
+        25 kHz was tried once, to silence a whine the left half developed at
+        1 % duty. It silenced it and cost the dimming: the duty ratio was the
+        same either way, so the extra light is the LED stage's turn-off tail,
+        which is a large share of a 40 us cycle and negligible in a 1 ms one.
+        Keep the period slow and fight whine with a longer duty instead.
+        """
+        dtsi = read(BOARD / "nocfree_and.dtsi")
+        period = re.search(r"pwms = <&pwm0 0 PWM_(MSEC|USEC|NSEC)\((\d+)\)", dtsi)
+        self.assertIsNotNone(period, "backlight PWM period not found")
+
+        scale = {"MSEC": 1_000_000, "USEC": 1_000, "NSEC": 1}
+        period_ns = int(period.group(2)) * scale[period.group(1)]
+        self.assertGreaterEqual(period_ns, 500_000, "too fast to reach a low brightness")
+
+        # Below the flicker fusion threshold the backlight would strobe.
+        self.assertLessEqual(period_ns, 20_000_000, "50 Hz or faster, else it flickers")
+
+    def test_the_backlight_on_level_tunes_in_single_percent_steps(self):
+        """BL_SET 100 makes each half's scale-percent its duty cycle directly.
+
+        Brightness crosses the LED API as an integer 0..100, so a lower BL_SET
+        would quantise the scale: at BL_SET 60 the reachable left-hand duties
+        were 1, 2, 3, 5 ... with several scale values collapsing onto each. At
+        100 the scale is the duty, and the halves still land on one number
+        because the behaviour is global.
+        """
+        keymap = read(BOARD / "nocfree_and.keymap")
+        self.assertIn("&bl BL_SET 100", keymap)
+
+    def test_neither_half_is_scaled_past_the_duty_ceiling(self):
+        """scale-percent above 100 is a no-op, not extra brightness.
+
+        With BL_SET 100 the scale is the duty in percent, and duty saturates at
+        100. A larger figure clamps and produces a bit-identical image, so a
+        build that "turns the right half up" past the ceiling would look like a
+        change and be none. Each half can only ever be taken down from here.
+        """
+        for half in ("left", "right"):
+            dts = read(BOARD / f"nocfree_and_{half}_nrf52833_zmk.dts")
+            found = re.search(r"scale-percent = <(\d+)>", dts)
+            self.assertIsNotNone(found, f"{half} half declares no scale-percent")
+            value = int(found.group(1))
+            with self.subTest(half):
+                self.assertGreater(value, 0, "a zero scale switches the half off")
+                self.assertLessEqual(value, 100, "above the duty ceiling, so a no-op")
+
     def test_unverified_hardware_stays_disabled(self):
-        """No output pin, regulator mode or radio power is asserted anywhere."""
+        """No other output pin, regulator mode or radio power is asserted."""
         text = " ".join(read(p) for p in BOARD.glob("*.dts*"))
         for forbidden in (
-            "zmk,backlight",
             "zmk,underglow",
-            "zmk,battery",
-            "pwm-leds",
             "gpio-leds",
             "regulator-initial-mode",
             # No devicetree mechanism may drive a pin either.
@@ -342,16 +455,94 @@ class RoleTest(unittest.TestCase):
         for name in BOARD.glob("*_defconfig"):
             config = name.read_text()
             for forbidden in (
-                "CONFIG_ZMK_BACKLIGHT",
                 "CONFIG_ZMK_RGB_UNDERGLOW",
                 "CONFIG_BT_CTLR_TX_PWR",
             ):
                 with self.subTest(f"{name.name} {forbidden}"):
                     self.assertNotIn(forbidden, config)
 
-            # This one defaults on, so it has to be turned off explicitly.
+            # Battery reporting defaults on, so every half has to make a
+            # deliberate choice. The left half measures (see below); the right
+            # half must still say n, or it advertises a Battery Service with
+            # nothing behind it.
             with self.subTest(f"{name.name} battery"):
-                self.assertIn("CONFIG_ZMK_BATTERY_REPORTING=n", config)
+                if "right" in name.name:
+                    self.assertIn("CONFIG_ZMK_BATTERY_REPORTING=n", config)
+                else:
+                    self.assertIn("CONFIG_ZMK_BATTERY_REPORTING=y", config)
+
+    def test_only_the_left_half_measures_the_battery(self):
+        """The divider node is per-half: the enable pin differs between them.
+
+        Section 4 of the porting guide puts the ADC on P0.04 (AIN2) on both
+        halves but the divider enable on P0.05 left and P0.31 right, so a node
+        shared through the .dtsi would drive the wrong pin on one of them.
+
+        io-channels carries the bare AIN number because
+        battery_voltage_divider.c computes `AnalogInput0 + channel` itself.
+        """
+        left = read(BOARD / "nocfree_and_left_nrf52833_zmk.dts")
+        right = read(BOARD / "nocfree_and_right_nrf52833_zmk.dts")
+
+        self.assertIn("zmk,battery-voltage-divider", left)
+        self.assertIn("io-channels = <&adc 2>", left)
+        self.assertIn("power-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>", left)
+        self.assertIn("zmk,battery = &vbatt", left)
+
+        # Step 2 of the battery plan adds the right half; until then it must
+        # not carry a divider node with the left half's enable pin.
+        self.assertNotIn("zmk,battery-voltage-divider", right)
+
+    def test_the_battery_readout_is_bound_where_the_factory_firmware_had_it(self):
+        """Fn+i types the level, matching the factory firmware's muscle memory.
+
+        The binding has to line up with the I key in the base layer: the two
+        layers are position-indexed, so an off-by-one here would silently put
+        the readout on a neighbouring key.
+        """
+        keymap = read(BOARD / "nocfree_and.keymap")
+        self.assertIn("nocfree,behavior-battery-report", keymap)
+
+        base = _layer_bindings(keymap, "default_layer")
+        fn = _layer_bindings(keymap, "function_layer")
+        self.assertEqual(len(base), len(fn))
+
+        positions = [i for i, b in enumerate(fn) if b.startswith("&batt_report")]
+        self.assertEqual(len(positions), 1, "expected exactly one battery readout binding")
+        self.assertEqual(base[positions[0]], "&kp I")
+
+    def test_the_battery_readout_only_types_layout_stable_characters(self):
+        """Keycodes are positional and the owner types German ISO.
+
+        Digits, letters and space sit in the same places on ANSI and ISO DE.
+        Punctuation does not, so a '%' in the output would type as something
+        else. The behaviour must not reach for one.
+        """
+        source = (ROOT / "src/behaviors/behavior_battery_report.c").read_text()
+        for forbidden in ("PERCENT", "PRCNT", "LS(", "HID_USAGE_KEY_KEYBOARD_MINUS"):
+            with self.subTest(forbidden):
+                self.assertNotIn(forbidden, source)
+
+    def test_the_battery_divider_declares_a_step_up_ratio(self):
+        """The divider node is well-formed and scales upward.
+
+        This deliberately does NOT pin the ratio. An earlier version asserted
+        full-ohms = 150 as "measured on hardware"; it was not. That figure came
+        from a single reading of a full battery on a cable, and with it the
+        readout saturates at 100 % -- lithium_ion_mv_to_pct() clamps at 4200 mV,
+        which a 1.5 ratio reaches at 2.80 V on the pin. See docs/battery.md.
+
+        So all that is checked is what must hold for any candidate ratio: the
+        properties exist and full-ohms exceeds output-ohms, because a battery
+        divider steps down and the driver corrects for it. Whoever calibrates
+        this properly should be free to change the number.
+        """
+        left = read(BOARD / "nocfree_and_left_nrf52833_zmk.dts")
+        output = re.search(r"output-ohms = <(\d+)>", left)
+        full = re.search(r"full-ohms = <(\d+)>", left)
+        self.assertIsNotNone(output, "divider declares no output-ohms")
+        self.assertIsNotNone(full, "divider declares no full-ohms")
+        self.assertGreater(int(full.group(1)), int(output.group(1)))
 
 
 class MetadataTest(unittest.TestCase):

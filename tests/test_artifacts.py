@@ -137,13 +137,31 @@ class ArtifactTest(unittest.TestCase):
         for role in self.ROLES:
             config = kconfig(role)
             for symbol in (
-                "CONFIG_ZMK_BACKLIGHT",
                 "CONFIG_ZMK_RGB_UNDERGLOW",
-                "CONFIG_ZMK_BATTERY_REPORTING",
                 "CONFIG_ZMK_STUDIO",
             ):
                 with self.subTest(f"{role} {symbol}"):
                     self.assertNotEqual(config.get(symbol), "y")
+
+    def test_only_the_left_half_measures_the_battery(self):
+        """The left half samples its own cell and types the value on Fn+i; the
+        right half has the same divider on a different enable pin but no
+        devicetree node yet, so its reporting must stay off. Enabling it there
+        is a real change that costs a flash of the expensive half -- it should
+        fail here rather than arrive as a side effect. See docs/battery.md."""
+        self.assertEqual(kconfig("left").get("CONFIG_ZMK_BATTERY_REPORTING"), "y")
+        self.assertNotEqual(kconfig("right").get("CONFIG_ZMK_BATTERY_REPORTING"), "y")
+
+    def test_backlight_is_built_but_starts_off(self):
+        """The backlight is the one driven output. It must reach the image on
+        both halves, and it must not come up lit: the polarity is documented,
+        not measured. See docs/backlight.md."""
+        for role in self.ROLES:
+            config = kconfig(role)
+            with self.subTest(role):
+                self.assertEqual(config.get("CONFIG_ZMK_BACKLIGHT"), "y")
+                self.assertEqual(config.get("CONFIG_LED_PWM"), "y")
+                self.assertNotEqual(config.get("CONFIG_ZMK_BACKLIGHT_ON_START"), "y")
 
     def test_application_is_linked_into_the_code_partition(self):
         for role in self.ROLES:
