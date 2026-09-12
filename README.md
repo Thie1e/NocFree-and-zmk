@@ -134,7 +134,7 @@ Rough edges worth knowing before you flash:
   of a typed readout, not as a fuel gauge.
 - **The brightness figures are one unit's.** Tuned by eye; expect to change them.
 
-## Getting started
+## Building it yourself
 
 ```sh
 ./scripts/build-local.sh /tmp/nocfree-build   # needs Docker, ~3.1 GB
