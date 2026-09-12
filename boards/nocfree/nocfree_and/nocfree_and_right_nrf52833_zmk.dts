@@ -12,7 +12,7 @@
      * unpopulated expander bits are excluded simply by being absent -- there is
      * no separate "ignore" table to keep in sync.
      *
-     * This half owns global keymap positions 37-83. Its 47 local
+     * This half owns global keymap positions 38-84. Its 47 local
      * columns are shifted into that range by the col-offset below, so the
      * positions it sends to the central are already global.
      *
@@ -48,10 +48,35 @@
     };
 };
 
-&ansi_layout {
+&iso_layout {
     kscan = <&kscan0>;
 };
 
 &matrix_transform0 {
-    col-offset = <37>;
+    col-offset = <38>;
+};
+
+/*
+ * Backlight brightness scale for this half. With the keymap's BL_SET 100 the
+ * scale is the duty in percent directly. This half ran at 100 until
+ * 2026-09-06 and went 100 -> 95 -> 80 -> 30 that day, each step asked for
+ * after seeing the last one on hardware: 95 was too small a change to read as
+ * darker at all, so the steps got bigger.
+ *
+ * 100 is the ceiling: a larger number clamps back to it and produces a
+ * bit-identical image, so this half can only be taken down, never up.
+ *
+ * 30 is close to the left half's 25, which is the first time the two figures
+ * are comparable. Do not read that as the halves being equally bright -- they
+ * are not equal at the same duty, which is the whole reason this property
+ * exists.
+ *
+ * Below 100 this half is pulsed, which it never was before. At 100 % duty the
+ * current was constant, which is why it stayed silent while the left half
+ * whined; 30 % is well into the range where the left one was audible, so
+ * listen for it here. If it hums, the lever is duty, not rate -- see
+ * docs/backlight.md.
+ */
+&backlight {
+    scale-percent = <30>;
 };

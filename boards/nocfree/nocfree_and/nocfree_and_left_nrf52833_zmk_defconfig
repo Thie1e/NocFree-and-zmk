@@ -36,10 +36,16 @@ CONFIG_CLOCK_CONTROL_NRF_K32SRC_RC_CALIBRATION=y
 CONFIG_ZMK_BLE=y
 CONFIG_ZMK_USB=y
 
-# No battery source is declared: the ADC and divider-enable pins are not
-# verified by this port. Reporting would otherwise default on and advertise a
-# Battery Service with nothing behind it.
-CONFIG_ZMK_BATTERY_REPORTING=n
+# Battery measurement on this half. The divider node is in the board .dts;
+# see the comment there for the pins and for why the reading is uncalibrated.
+#
+# This is step 1 of the battery plan: establish that the ADC reads something
+# that tracks charge and discharge. Over USB the value is invisible to a host
+# (USB HID has no battery channel), so it is read over BLE or, later, typed out
+# by a dedicated behaviour.
+CONFIG_ZMK_BATTERY_REPORTING=y
+CONFIG_ADC=y
+CONFIG_SENSOR=y
 
 # USB CDC interface used only for 1200-baud bootloader recovery.
 CONFIG_SERIAL=y
@@ -72,3 +78,25 @@ CONFIG_BT_CONN_TX_MAX=8
 # disconnects; the default of 5 silently drops releases beyond it if more
 # keys are held at that moment.
 CONFIG_ZMK_SPLIT_BLE_CENTRAL_POSITION_QUEUE_SIZE=16
+
+# Backlight on P0.20 via PWM, the pin published as D5 in section 4 of the
+# porting guide; see docs/backlight.md. It starts OFF: the polarity is taken
+# from documentation and from the factory image, not from a measurement, and
+# a wrong reading must not be able to sit at full brightness on battery.
+# Switch it on with Fn+F7.
+# ZMK's backlight does not select its own driver stack at the pinned
+# revision, so the PWM LED driver has to be enabled here or the pwmleds node
+# is never instantiated and backlight.c fails to link.
+CONFIG_PWM=y
+CONFIG_LED=y
+CONFIG_LED_PWM=y
+CONFIG_ZMK_BACKLIGHT=y
+CONFIG_ZMK_BACKLIGHT_BRT_START=40
+CONFIG_ZMK_BACKLIGHT_ON_START=n
+CONFIG_ZMK_BACKLIGHT_AUTO_OFF_IDLE=y
+
+# The backlight follows ZMK's idle state, and ZMK's default idle timeout is
+# 30 seconds -- far too short for a backlight the owner wants lit while
+# reading. 60 minutes. The cost is that ZMK stays in its active BLE mode that
+# much longer, with the shorter connection interval that goes with it.
+CONFIG_ZMK_IDLE_TIMEOUT=3600000

@@ -38,9 +38,13 @@ CONFIG_ZMK_BLE=y
 CONFIG_ZMK_BATTERY_REPORTING=n
 
 # USB is brought up only for the CDC recovery interface, so this half keeps a
-# host-driven bootloader path that does not depend on the split link. (Fn+Del
-# does reach this half's bootloader, but only while it is connected to the
-# central.) With CONFIG_ZMK_USB unset ZMK never calls usb_enable(), so
+# host-driven bootloader path that does not depend on the split link -- the one
+# route that still works when this half cannot pair with the central.
+# Fn+Delete does reach this half's bootloader (confirmed on hardware), but only
+# while it is connected to the central AND cabled to USB itself: the bootloader
+# presents a mass-storage device, which needs a host to enumerate to.
+# See docs/recovery.md.
+# With CONFIG_ZMK_USB unset ZMK never calls usb_enable(), so
 # INITIALIZE_AT_BOOT is the line that actually enumerates USB here.
 CONFIG_USB_DEVICE_STACK=y
 CONFIG_USB_DEVICE_INITIALIZE_AT_BOOT=y
@@ -71,3 +75,25 @@ CONFIG_BT_CONN_TX_MAX=8
 # queue widens the window in which no intermediate keystroke is lost.
 # 32 entries x 16 B = 512 B of RAM.
 CONFIG_ZMK_SPLIT_BLE_PERIPHERAL_POSITION_QUEUE_SIZE=32
+
+# Backlight on P0.20 via PWM, the pin published as D5 in section 4 of the
+# porting guide; see docs/backlight.md. It starts OFF: the polarity is taken
+# from documentation and from the factory image, not from a measurement, and
+# a wrong reading must not be able to sit at full brightness on battery.
+# Switch it on with Fn+F7.
+# ZMK's backlight does not select its own driver stack at the pinned
+# revision, so the PWM LED driver has to be enabled here or the pwmleds node
+# is never instantiated and backlight.c fails to link.
+CONFIG_PWM=y
+CONFIG_LED=y
+CONFIG_LED_PWM=y
+CONFIG_ZMK_BACKLIGHT=y
+CONFIG_ZMK_BACKLIGHT_BRT_START=40
+CONFIG_ZMK_BACKLIGHT_ON_START=n
+CONFIG_ZMK_BACKLIGHT_AUTO_OFF_IDLE=y
+
+# The backlight follows ZMK's idle state, and ZMK's default idle timeout is
+# 30 seconds -- far too short for a backlight the owner wants lit while
+# reading. 60 minutes. The cost is that ZMK stays in its active BLE mode that
+# much longer, with the shorter connection interval that goes with it.
+CONFIG_ZMK_IDLE_TIMEOUT=3600000
