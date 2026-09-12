@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MIT
+
+description: |
+  A LED device that forwards to another LED device with a fixed per-device
+  scale applied to the brightness.
+
+  The two halves of this keyboard do not reach the same brightness at the same
+  PWM duty: part of the difference is supply voltage (a half on USB is brighter
+  than one on battery) and part remains at equal supply, which is a property of
+  the LED string itself. ZMK sends both halves one brightness value and has no
+  per-half adjustment, so the correction has to live in the LED device.
+
+  Child nodes mirror the target's children one for one; ZMK derives its LED
+  count from DT_NUM_CHILD of the chosen backlight node.
+
+compatible: "nocfree,scaled-led"
+
+include: base.yaml
+
+properties:
+  target:
+    type: phandle
+    required: true
+    description: The LED device this one forwards to.
+
+  scale-percent:
+    type: int
+    required: true
+    description: |
+      Brightness multiplier in percent. 100 forwards unchanged, 70 makes this
+      half dimmer, 150 makes it brighter. The scaled value is clamped to 100,
+      so a scale above 100 compresses the top of the range rather than
+      extending it.
+
+child-binding:
+  description: One entry per LED of the target device.
+  properties: {}
