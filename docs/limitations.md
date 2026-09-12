@@ -2,8 +2,9 @@
 
 # Limitations
 
-This is a baseline: an ANSI left/right keyboard over Bluetooth, and nothing
-else. Everything below is deliberately absent.
+This is an ISO left/right keyboard over Bluetooth or USB, plus the backlight,
+per-half brightness correction and a bootloader key on each half. Everything
+below is deliberately absent.
 
 ## Not implemented
 
@@ -11,21 +12,22 @@ else. Everything below is deliberately absent.
 |---|---|
 | Numpad | Separate device; not part of this slice. |
 | Factory USB receiver, ESB / 2.4 GHz | Needs a proprietary protocol and pairing data ported. |
-| Battery reporting | ADC and divider-enable pins unverified; the divider must never be left on. |
-| Backlight | Needs a verified PWM polarity. Driving it wrong is a hardware risk. |
+| A trustworthy battery level | The left half's readout is a stub, see below. The right half has none. |
 | Status LEDs, charge indicator | Same: unverified output pins and polarity. |
 | Mode switch | The left half's three-position switch has no verified electrical role. |
 | ZMK Studio | Requires per-key physical geometry, which this port has not measured. |
-| Deep sleep / soft off | Needs a wake source; the expander `INT` line is unused. |
+| Deep sleep / soft off | Needs a wake source; the expander `INT` line is unused. The keyboard never powers down. |
 | Gaming / low-latency modes | Out of scope for a baseline. |
 
-No output pin is driven anywhere in this port. Optional and unverified hardware
-is left alone rather than configured with a guess.
+The backlight on P0.20 is the only output pin this port drives. It is the pin
+section 4 of the porting guide publishes, and its polarity is corroborated by
+the factory image; see [backlight.md](backlight.md). Every other piece of
+optional hardware is left alone rather than configured with a guess.
 
 ## Known rough edges
 
-- **Application slot headroom.** The left image currently fills about 91% of
-  the 248 KiB code partition and the right about 75%. That is enough for keymap
+- **Application slot headroom.** The left image currently fills about 95% of
+  the 248 KiB code partition and the right about 76%. That is enough for keymap
   changes, not for a large feature. The application region has 280 KiB in total,
   so the code/settings split could be moved — but doing so relocates the
   settings partition and discards saved pairings, so it should be decided before
@@ -33,10 +35,18 @@ is left alone rather than configured with a guess.
 - **Idle current.** Polling keeps the I2C bus busy for roughly 1.5 ms out of
   every 10 ms even when nothing is pressed. Expander-interrupt idle wakeup is
   the fix, and is also what deep sleep would need.
-- **Bottom-row modifiers.** The default keymap follows the Mac legends on the
-  retail ANSI keycaps (`Fn` / `Control` / `Option` / `Command` from the outside
-  in). This is the least certain part of the map. It is a keymap edit only and
-  does not affect the electrical mapping.
+- **Backlight brightness is tuned by eye.** The two halves do not reach the
+  same brightness at the same duty, so each carries a fixed `scale-percent`
+  (left 25, right 30) found by looking at them. Those figures belong to one
+  unit and are a starting point, not a measurement. The left half also emits a
+  faint low hum at low duty. See [backlight.md](backlight.md).
+- **The battery readout is a stub and reads 100 % permanently.** `Fn`+`i`
+  types `bat NN` on the left half, but the divider ratio was set from a single
+  reading of a full cell, and at that ratio the percentage saturates: the
+  conversion clamps at 4200 mV, which the divider reaches at 2.80 V on the pin,
+  and a charging cell sits above that. The value has never been observed
+  falling. The measurement path works; the scaling is unresolved and nobody is
+  working on it. See [battery.md](battery.md).
 - **Split reliability.** This port uses ZMK's stock split protocol with no
   code additions, tuned for link margin: both halves stay on the more
   sensitive 1M PHY (`CONFIG_ZMK_BLE_EXPERIMENTAL_CONN`) and carry a deeper
@@ -53,7 +63,16 @@ is left alone rather than configured with a guess.
 
 ## Hardware status
 
-Observed on one ANSI unit, on macOS.
+**The ISO changes in this branch run on hardware.** Both halves of one ISO unit
+have been flashed repeatedly and are in daily use on Linux since 2026-08-22:
+the layout types correctly including both ISO-only keys, the backlight works on
+both halves, and `Fn`+`Esc` / `Fn`+`Delete` reach the bootloader. `Fn`+`i` types
+a battery line, but see the stub note above for what that number is worth. The
+left shift row's wiring was confirmed by typing it through rather than assumed.
+
+That is one ISO unit on one host operating system. The observations below were
+recorded earlier on one ANSI unit on macOS and are kept because they establish
+the baseline this branch builds on.
 
 With the split-link images (the `feat: harden the split link at desk
 distances` commit; both halves' images read back from the bootloader after
@@ -92,6 +111,8 @@ one host operating system, and one hardware revision.
   USB power, and no battery life figures are claimed.
 - Reconnection after a power cycle, and rollback to factory firmware, have not
   been exercised.
-- No battery life, latency, idle current, or endurance figures.
-- No Windows or Linux compatibility claims.
+- No battery life, latency, idle current, or endurance figures. The battery
+  *percentage* is not a claim either -- see the stub note above.
+- No Windows compatibility claims. Linux is what the ISO work was done on;
+  macOS was the baseline host. Neither was tested systematically.
 - No claim about any other unit or hardware revision.

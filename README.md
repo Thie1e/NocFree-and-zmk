@@ -1,3 +1,150 @@
+# NocFree& ISO firmware (`iso-de` branch)
+
+A community ZMK build for the **ISO** NocFree &, forked from
+[NocFreeKB/NocFree-and-zmk](https://github.com/NocFreeKB/NocFree-and-zmk).
+Upstream ports the ANSI board; this branch adds the 85-key ISO matrix, the
+backlight and a bootloader key on each half.
+
+Shared as-is for reference by [@thie1e](https://github.com/thie1e).
+
+**This is not official NocFree firmware. Use at your own risk.**
+
+Full disclaimer: I have been using the firmware for a few 
+weeks with practically no lost keystrokes (unless the distance 
+between the halves is very large), but it is completely vibe-coded.
+Read the sections about what works and what doesn't work.
+
+The disclaimer in section 1 of the porting guide
+below applies in full, including the part about permanently damaging your
+hardware.
+
+> **I only use ISO DE, but the firmware should work for other locales, too.** 
+> HID keycodes are positional: the firmware
+> sends *which key was pressed*, and your operating system decides what it
+> prints. This branch adds the two keys ISO has and ANSI does not, so it serves
+> German, French, Spanish, Nordic and every other ISO layout equally. Set the
+> layout in your OS. See [docs/iso-de.md](docs/iso-de.md).
+
+## What works
+
+Everything here works on my ISO unit unless noted otherwise — on Linux, in
+daily use since 2026-08-22.
+
+| Feature | Notes |
+|---|---|
+| **ISO layout, 85 keys** | 38 left / 47 right. Adds `NON_US_BSLH` (`<>\|`) and `NON_US_HASH` (`#'`). Keycaps read out of the factory ISO image, not guessed. |
+| **USB** | Left half is the split central and talks to the host. This is how I use it. |
+| **Bluetooth — built but untested by me** | Five BLE profiles are bound on the `Fn` layer and the code is ZMK's stock BLE, untouched by this fork. I run the keyboard wired and cannot vouch for it. |
+| **Backlight** | Works. On `P0.20`, one PWM channel. Absolute levels only — see the drift note below. |
+| **Per-half brightness correction** | The halves differ at the same duty. A small module-local LED driver (`nocfree,scaled-led`) scales each half by a fixed percentage. Otherwise I could not get the halves to the same brightness. So there is only one fixed brightness level (on/off), because synchronizing the backlight between left and right is tricky. Which is maybe also the reason why that didn't work well out-of-the-box. Also, the brightness depends on whether USB is connected and for the right half additionally on switching it on or off. |
+| **Bootloader from the keymap** | `Fn`+`Esc` (left) and `Fn`+`Delete` (right), held 1.5 s. To flash the right half, both have to be connected via USB, because keystrokes are transmitted via the left. |
+| **Media and navigation keys** | Volume, transport, `Home`/`End`, `PgUp`/`PgDn`, real `F5`–`F12` on the `Fn` layer. |
+| **< key** | With the stock firmware, < and > were transmitted only after releasing that key, for whatever reason, but ZMK resolved that. |
+
+**The keymap is my favorite arrangement, not the factory layout.** Bottom rows,
+the navigation cluster and the function row were rearranged to taste. Read
+[`nocfree_and.keymap`](boards/nocfree/nocfree_and/nocfree_and.keymap) before
+flashing and change it to your preference.
+
+![The ISO keyboard with the configured, German layout. The keycaps are translucent ones from Keychron.](docs/img/iso-de-layout.jpg)
+
+The symbols on `F1`-`F4` are macOS functions the factory firmware sent; this build
+sends the plain function keys instead. What the top row actually does:
+
+| Key | On its own | With `Fn` |
+|---|---|---|
+| `F1`-`F4` | `F1`-`F4` | same |
+| `F5` / `F6` | backlight **off** / **on** | `F5` / `F6` |
+| `F7`-`F12` | prev, play/pause, next, mute, volume down, volume up | `F7`-`F12` |
+| the key left of `M1` | `PrtSc` | — |
+| `M1` | nothing — unbound | — |
+
+Only `F5`-`F12` are remapped, and `Fn` gives you the real function key back.
+`F1`-`F4` need no such escape because they are already the real ones. 
+
+The rest of the `Fn` layer:
+
+| `Fn` + | Does |
+|---|---|
+| `Esc` | tap: reset the left half. Hold 1.5 s: left bootloader. |
+| `Del` | the same for the right half (that half needs its own USB cable) |
+| `1`-`5` | select Bluetooth profile 1-5 |
+| `0` | clear the current Bluetooth profile |
+| `u` / `b` | output to USB / Bluetooth |
+| `i` | type the battery level — but see the stub warning below |
+| `Home` / `End` | Page Up / Page Down |
+
+Everything not listed passes through unchanged.
+
+## What does not work
+
+| Not implemented | Why |
+|---|---|
+| A trustworthy battery level | There is a readout on `Fn`+`i`, but it is a stub — see below. The right half has none at all. |
+| Numpad | Separate device, I don't own one. |
+| Factory USB receiver / 2.4 GHz dongle | Proprietary encrypted ESB protocol. ZMK speaks BLE; the factory dongle will never work with this firmware. |
+| Deep sleep / soft off | Not implemented, and this build **never powers down**. See the power note below. |
+| Status LEDs, charge indicator, mode switch | Unverified output pins and polarity. Left alone rather than configured with a guess. |
+| ZMK Studio | Needs per-key physical geometry this port has not measured. |
+
+Rough edges worth knowing before you flash:
+
+- **Power.** With no deep sleep and a 60-minute idle timeout, this firmware
+  drains the battery faster than the factory one. That was a deliberate choice
+  for a keyboard that lives on a cable. I like it better this way, because 
+  otherwise I always had to wake up both halves after a short time and I could
+  never tell if the keyboard had gone to sleep or not. If you run yours on battery,
+  set `CONFIG_ZMK_IDLE_TIMEOUT` back down and consider implementing sleep.
+- **Flash headroom is nearly gone on the left.** About 95 % of the 248 KiB code
+  partition. Small keymap changes fit; a large feature does not.
+- **Split reliability** uses ZMK's stock protocol, tuned for link margin. A
+  dropped notification is repaired by the next key event, not immediately.
+- **Backlight brightness drifts apart between the halves** unless you use
+  absolute levels. This is a ZMK-wide issue, not specific to this board: the
+  behaviour is global but there is no state sync, so one missed relay puts a
+  permanent offset between the halves and relative steps preserve it. That is
+  why this keymap binds `&bl BL_SET 100` and never `BL_INC`/`BL_DEC`.
+- **The battery readout is a stub. Do not trust it.** `Fn`+`i` types `bat NN`
+  on the left half, and on the unit it was written for it reads `100`
+  permanently. The measurement path itself works (ADC, divider enable, 
+  the typed output); only the number is wrong. Treat it as a worked example
+  of a typed readout, not as a fuel gauge.
+- **The brightness figures are one unit's.** Tuned by eye; expect to change them.
+
+## Getting started
+
+```sh
+./scripts/build-local.sh /tmp/nocfree-build   # needs Docker, ~3.1 GB
+./tests/run.sh                                # no hardware needed
+```
+
+Then read, in this order:
+
+| Document | Contents |
+|---|---|
+| [docs/recovery.md](docs/recovery.md) | **Read this first.** How to reach the bootloader and how to get back to factory firmware. |
+| [docs/iso-de.md](docs/iso-de.md) | What ISO changes, and why this is not a German keymap |
+| [docs/backlight.md](docs/backlight.md) | The scaled-LED driver, the PWM rate, and the coil whine |
+| [docs/battery.md](docs/battery.md) | The divider, why the number is wrong, and the typed readout |
+| [docs/limitations.md](docs/limitations.md) | The full list of what is excluded and unverified |
+| [docs/build.md](docs/build.md), [docs/testing.md](docs/testing.md) | Building, and what the tests do and do not cover |
+| [docs/architecture.md](docs/architecture.md) | Roles, key scanning, flash layout (upstream) |
+
+**Flashing needs the right half cabled too.** Both halves have their own USB-C
+port. `Fn`+`Delete` resets the right half into its bootloader, but the drive
+only appears if that half is plugged into the host itself — a USB device needs
+a host to enumerate to. Left cable alone is not enough.
+
+## Licence and attribution
+
+MIT, unchanged from upstream. The porting guide below is **NocFree's own
+document** and is reproduced intact; the hardware facts in it are theirs, and
+this fork's tests assert that its sections stay unmodified.
+
+Everything from here down are upstream's docs.
+
+---
+
 # NocFree Keyboard ZMK Porting Guide
 
 This document is intended for community members developing ZMK support for NocFree nRF52833 split keyboards. It provides the hardware interfaces and porting information required for community development. ZMK-related code is implemented and maintained by the community; NocFree does not provide official ZMK firmware or guarantee compatibility.
