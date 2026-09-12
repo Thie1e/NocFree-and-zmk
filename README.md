@@ -71,6 +71,8 @@ flashing and change it to your preference.
 
 ![The ISO keyboard with the configured, German layout. The keycaps are translucent ones from Keychron.](docs/img/iso-de-layout.jpg)
 
+(The keycaps are the "ISO Low Profile Shine-Through ABS LSA Full Set Keycap Set - Black" from Keychron)
+
 The symbols on `F1`-`F4` are macOS functions the factory firmware sent; this build
 sends the plain function keys instead. What the top row actually does:
 
