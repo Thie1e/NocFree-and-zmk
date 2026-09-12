@@ -13,8 +13,8 @@ Shared as-is for reference by [@thie1e](https://github.com/thie1e).
 
 **Full disclaimer: I have been using the firmware for a few 
 weeks with practically no lost keystrokes (unless the distance 
-between the halves is very large), but it is completely vibe-coded.
-Read the sections about what works and what doesn't work.**
+between the halves is very large)! It is completely vibe-coded, 
+though. Read the sections about what works and what doesn't work.**
 
 **The layout and the function keys are my personal preference, see
 below. Adjust that to your liking.** 
@@ -27,8 +27,6 @@ only, but keep that in mind.**
 brightness. I am using fixed brightness values for that reason, 
 so using this firmware you can only switch the backlight on or off 
 using F5 and F6, there are no brightness levels anymore.**
-
-**Most importantly: No lost keystrokes anymore for several weeks now!**
 
 The disclaimer in section 1 of the porting guide
 below applies in full, including the part about permanently damaging your
