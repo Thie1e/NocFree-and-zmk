@@ -8,7 +8,9 @@
 
 #include <nordic/nrf52833_qiaa.dtsi>
 #include <common/nordic/nrf52833_uf2_boot_mode.dtsi>
+#include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/i2c/i2c.h>
+#include <dt-bindings/pwm/pwm.h>
 #include <dt-bindings/zmk/matrix_transform.h>
 
 #include "nocfree_and-pinctrl.dtsi"
@@ -22,15 +24,69 @@
         zephyr,code-partition = &code_partition;
         zephyr,sram = &sram0;
         zephyr,flash = &flash0;
-        zmk,physical-layout = &ansi_layout;
+        zmk,physical-layout = &iso_layout;
+        zmk,backlight = &backlight;
+    };
+
+    /*
+     * Backlight on P0.20, the pin section 4 of the porting guide publishes as
+     * D5 on both halves.
+     *
+     * Active high, established on hardware: with the channel inverted, the
+     * backlight was lit at brightness 0 and dimmed as the level rose. The
+     * porting guide's note that the factory API "drives the pin low at
+     * endpoint 255" does not translate into an inverted Zephyr channel; the
+     * measurement wins. See docs/backlight.md.
+     *
+     * 200 Hz, and it must not get faster. 25 kHz was tried, to silence a whine
+     * the left half developed at low duty, and it worked -- but the left half
+     * then would not go dim any more. The duty ratio was identical either way
+     * (6/640 against 160/16000, both ~1 %), so the extra light is the LED stage
+     * responding to the pulse *shape*: at 40 us a fixed turn-off tail is a large
+     * part of every cycle, at 1 ms it is negligible. On this hardware the PWM
+     * rate therefore sets how dim the backlight can go, and raising it raises
+     * the floor.
+     *
+     * So the whine is chased downwards instead. Raising the duty did not help
+     * (3 % and 4 % both whined), which leaves the rate: a small ceramic radiates
+     * a low tone far less efficiently, and the ear is less sensitive there,
+     * while a longer period keeps the turn-off tail insignificant and the dim
+     * end intact. 200 Hz is well above flicker fusion but the phantom-array
+     * effect can show during eye movement -- that is the thing to watch for.
+     * See docs/backlight.md.
+     */
+    backlight_pwm: pwmleds {
+        compatible = "pwm-leds";
+        status = "okay";
+
+        pwm_led_0: pwm_led_0 {
+            pwms = <&pwm0 0 PWM_MSEC(5) PWM_POLARITY_NORMAL>;
+        };
+    };
+
+    /*
+     * ZMK sends one brightness value to both halves and has no per-half
+     * adjustment, but the halves do not reach the same brightness at the same
+     * duty: part of that is supply voltage (a half on USB is brighter than one
+     * on battery) and part survives at equal supply. The per-half scale is set
+     * in each board's own .dts. See docs/backlight.md.
+     */
+    backlight: backlight_scaled {
+        compatible = "nocfree,scaled-led";
+        status = "okay";
+        target = <&backlight_pwm>;
+        scale-percent = <100>;
+
+        scaled_led_0 {
+        };
     };
 
     /*
      * The keys are not an electrical row/column matrix: every key has its own
-     * expander input. The transform is therefore a single logical row of 84
+     * expander input. The transform is therefore a single logical row of 85
      * independent columns, listed here in visual reading order.
      *
-     * Columns 0-36 are the left half and columns 37-83 are the right half.
+     * Columns 0-37 are the left half and columns 38-84 are the right half.
      * Each half reports its own local column index; the right half shifts its
      * indices into the second range with col-offset, so both halves resolve to
      * the same global keymap positions. That is what lets the split peripheral
@@ -39,36 +95,36 @@
     matrix_transform0: keymap_transform_0 {
         compatible = "zmk,matrix-transform";
         rows = <1>;
-        columns = <84>;
+        columns = <85>;
 
         map = <
             /* Function row */
-            RC(0,0)  RC(0,1)  RC(0,2)  RC(0,3)  RC(0,4)  RC(0,5)  RC(0,6)
-            RC(0,37) RC(0,38) RC(0,39) RC(0,40) RC(0,41) RC(0,42) RC(0,43) RC(0,44)
+            RC(0,0) RC(0,1) RC(0,2) RC(0,3) RC(0,4) RC(0,5) RC(0,6)
+            RC(0,38) RC(0,39) RC(0,40) RC(0,41) RC(0,42) RC(0,43) RC(0,44) RC(0,45)
             /* Number row */
-            RC(0,7)  RC(0,8)  RC(0,9)  RC(0,10) RC(0,11) RC(0,12) RC(0,13)
-            RC(0,45) RC(0,46) RC(0,47) RC(0,48) RC(0,49) RC(0,50) RC(0,51) RC(0,52)
+            RC(0,7) RC(0,8) RC(0,9) RC(0,10) RC(0,11) RC(0,12) RC(0,13)
+            RC(0,46) RC(0,47) RC(0,48) RC(0,49) RC(0,50) RC(0,51) RC(0,52) RC(0,53)
             /* Tab row */
             RC(0,14) RC(0,15) RC(0,16) RC(0,17) RC(0,18) RC(0,19)
-            RC(0,53) RC(0,54) RC(0,55) RC(0,56) RC(0,57) RC(0,58) RC(0,59) RC(0,60)
+            RC(0,54) RC(0,55) RC(0,56) RC(0,57) RC(0,58) RC(0,59) RC(0,60) RC(0,61)
             /* Home row */
             RC(0,20) RC(0,21) RC(0,22) RC(0,23) RC(0,24) RC(0,25)
-            RC(0,61) RC(0,62) RC(0,63) RC(0,64) RC(0,65) RC(0,66) RC(0,67) RC(0,68)
+            RC(0,62) RC(0,63) RC(0,64) RC(0,65) RC(0,66) RC(0,67) RC(0,68) RC(0,69)
             /* Shift row */
-            RC(0,26) RC(0,27) RC(0,28) RC(0,29) RC(0,30) RC(0,31)
-            RC(0,69) RC(0,70) RC(0,71) RC(0,72) RC(0,73) RC(0,74) RC(0,75) RC(0,76)
+            RC(0,26) RC(0,27) RC(0,28) RC(0,29) RC(0,30) RC(0,31) RC(0,32)
+            RC(0,70) RC(0,71) RC(0,72) RC(0,73) RC(0,74) RC(0,75) RC(0,76) RC(0,77)
             /* Bottom row */
-            RC(0,32) RC(0,33) RC(0,34) RC(0,35) RC(0,36)
-            RC(0,77) RC(0,78) RC(0,79) RC(0,80) RC(0,81) RC(0,82) RC(0,83)
+            RC(0,33) RC(0,34) RC(0,35) RC(0,36) RC(0,37)
+            RC(0,78) RC(0,79) RC(0,80) RC(0,81) RC(0,82) RC(0,83) RC(0,84)
         >;
     };
 };
 
 /*
- * No GPIO pin is used by this port -- the only pins it configures are the two
- * I2C lines, through pinctrl. The controllers are enabled so the board can be
- * extended without a devicetree change, and GPIOTE is required alongside them
- * by the nRF GPIO driver.
+ * The only pins this port configures are the two I2C lines and the backlight
+ * PWM output, all through pinctrl. The controllers are enabled so the board
+ * can be extended without a devicetree change, and GPIOTE is required
+ * alongside them by the nRF GPIO driver.
  */
 &gpiote {
     status = "okay";
@@ -79,6 +135,15 @@
 };
 
 &gpio1 {
+    status = "okay";
+};
+
+/*
+ * SAADC, used only for the battery divider. The divider node itself is
+ * per-half: both halves sample AIN2 (P0.04), but the enable line differs
+ * (P0.05 left, P0.31 right), so it lives in each board's .dts.
+ */
+&adc {
     status = "okay";
 };
 
@@ -119,6 +184,13 @@
         #key-cells = <1>;
         status = "okay";
     };
+};
+
+&pwm0 {
+    status = "okay";
+    pinctrl-0 = <&pwm0_default>;
+    pinctrl-1 = <&pwm0_sleep>;
+    pinctrl-names = "default", "sleep";
 };
 
 zephyr_udc0: &usbd {

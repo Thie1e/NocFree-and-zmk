@@ -6,10 +6,11 @@ name: NocFree &
 type: board
 arch: arm
 url: https://github.com/NocFreeKB/NocFree-and-zmk
-description: Community ZMK support for the NocFree & ANSI split keyboard
+description: Community ZMK support for the NocFree & ISO split keyboard
 manufacturer: NocFree
 features:
   - keys
+  - backlight
 outputs:
   - usb
   - ble

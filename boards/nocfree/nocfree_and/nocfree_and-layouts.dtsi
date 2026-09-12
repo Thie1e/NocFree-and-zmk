@@ -13,9 +13,9 @@
      * having none. A contributor who measures the board can add `keys` and
      * enable CONFIG_ZMK_STUDIO in one change.
      */
-    ansi_layout: nocfree_and_ansi_layout {
+    iso_layout: nocfree_and_iso_layout {
         compatible = "zmk,physical-layout";
-        display-name = "ANSI";
+        display-name = "ISO";
         transform = <&matrix_transform0>;
     };
 };
