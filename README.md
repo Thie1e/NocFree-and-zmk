@@ -28,6 +28,15 @@ brightness. I am using fixed brightness values for that reason,
 so using this firmware you can only switch the backlight on or off 
 using F5 and F6, there are no brightness levels anymore.**
 
+**Ready-built images are attached to the
+[latest release](https://github.com/Thie1e/NocFree-and-zmk/releases/latest),
+so you do not have to build anything.** To flash a half, hold `Fn`+`Esc`
+(left) or `Fn`+`Delete` (right) for 1.5 s: it reboots into its bootloader and
+appears as a USB drive you copy the `.uf2` onto. **The right half needs its
+own USB cable for that drive to appear.** Coming from factory firmware, which
+has no `Fn`+`Esc`, hold `Fn`+`5`. Details and the way back in
+[docs/recovery.md](docs/recovery.md).
+
 The disclaimer in section 1 of the porting guide
 below applies in full, including the part about permanently damaging your
 hardware.
