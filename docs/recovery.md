@@ -29,23 +29,78 @@ interface. Opening it at 1200 baud requests a warm reset into the preserved UF2
 bootloader. This is the same convention Arduino and Adafruit tooling use.
 
 ```sh
-# macOS / Linux, after identifying the correct port
-stty -f /dev/tty.usbmodemXXXX 1200      # macOS
-stty -F /dev/ttyACMX 1200               # Linux
+# Linux -- resolves the port itself, so it does not matter which ttyACM
+# number the kernel handed out. Connect one half at a time.
+sudo stty -F "$(readlink -f /dev/serial/by-id/*NocFree*)" 1200
+
+# macOS
+stty -f /dev/tty.usbmodemXXXX 1200
 ```
 
-**2. `Fn`+`Delete` (right half, split link required).** ZMK reset behaviours
-act on the half whose key triggered them, and `Delete` is a right-half key, so
-this reboots the **right** half into its bootloader — but only while that half
-is connected to the left over the split link, because the left half runs the
-keymap and forwards the behaviour. A right half that cannot pair — the main
-recovery scenario — must use the 1200-baud touch, which is exactly why it
-carries the CDC interface. The left half has no bootloader key at all; recover
-it with the touch.
+On Linux the CDC node is owned by `root:dialout`, so this needs `sudo` unless
+the user is in the `dialout` group. `usermod -aG dialout "$USER"` and a fresh
+login removes that, or a udev rule scoped to the ZMK vendor/product ID
+(`1d50:615e`) does the same for this keyboard alone.
 
-If your hardware exposes a reset control, the Adafruit nRF52 bootloader also
-supports its usual double-tap entry. This port has not verified whether that
-control is accessible on these halves; do not rely on it.
+**2. `Fn`+`Esc` and `Fn`+`Delete` (key combination).** Both are hold-taps: a
+tap resets that half, a 1.5-second hold reboots it into its bootloader. ZMK
+reset behaviours act on the half whose key triggered them, and `Esc` is a
+left-half key while `Delete` is a right-half one, so `Fn`+`Esc` recovers the
+left half and `Fn`+`Delete` the right.
+
+**Both are confirmed working on hardware.** `Fn`+`Delete` carries one condition
+that is easy to mistake for a fault: **the right half must be connected to USB
+itself.** The bootloader presents a mass-storage device, and a device needs a
+host to enumerate to, so on an uncabled half the reset happens and the drive
+simply never appears. Flashing the right half therefore wants **both** halves
+cabled — the left because it runs the keymap and forwards the behaviour over the
+split link, the right because that is where the drive has to show up.
+
+`Fn`+`Delete` also only works while the right half is connected to the left over
+the split link. A right half that cannot pair — the main recovery scenario —
+must use the 1200-baud touch, which is exactly why it carries the CDC interface.
+
+### Telling the halves apart
+
+`Board-ID` is `NocFree &` on both, so the bootloader drive does not identify
+which half you are on. The CDC serial node does:
+
+```sh
+ls -l /dev/serial/by-id/
+# ...NocFree___<serial>-if00        -> left
+# ...NocFree___Right_<serial>-if00  -> right
+```
+
+### Notes from diagnosing this
+
+Recorded because it took a USB-logging build to settle, and none of it should
+need re-deriving. Checked against ZMK `6e2ef41` and against the built images:
+
+- `&bootloader` is `BEHAVIOR_LOCALITY_EVENT_SOURCE`, and `behavior.c` sends
+  non-local sources to `zmk_split_central_invoke_behavior`.
+- Hold-tap preserves `.source` into every one of its four binding calls.
+- The name `bootload` is 8 characters and fits `ZMK_SPLIT_RUN_BEHAVIOR_DEV_LEN`
+  (9), and the peripheral's lookup falls back to `strcmp`, so it resolves.
+- The behaviour is genuinely built into the right-half image: its device struct
+  is well formed and its config byte is `0x01` (`BOOT_MODE_TYPE_BOOTLOADER`),
+  byte-identical to the left half's.
+- Both halves set `CONFIG_RETENTION_BOOT_MODE=y` and pull in the same
+  `nrf52833_uf2_boot_mode.dtsi`, so the boot-mode plumbing is symmetric.
+- The payload is 20 bytes and the central writes it in one
+  `bt_gatt_write_without_response`, fitting the default 23-byte ATT MTU with
+  `offset == 0`. (`split_svc_run_behavior` does `memcpy(payload + offset, ...)`,
+  which advances by whole structs rather than bytes — a genuine upstream bug,
+  but dormant while the write is not fragmented.)
+
+To build a peripheral image that logs over CDC, `CONFIG_ZMK_USB_LOGGING=y` is
+not sufficient on this board: Zephyr's UART log backend resolves its device from
+the `zephyr,console` chosen node at compile time, and this board deliberately
+declares `cdc_acm_uart0` without designating it as console. A devicetree overlay
+adding `zephyr,console = &cdc_acm_uart0` is required, passed via
+`-DEXTRA_DTC_OVERLAY_FILE=` — dropping it into the ZMK config directory alone is
+ignored. Expect the right-half image to grow from roughly 76 % to 90 % of the
+code partition, and expect `Unable to enable USB` in the log, which is harmless:
+the board already enumerates USB via `CONFIG_USB_DEVICE_INITIALIZE_AT_BOOT`.
 
 ## Order of operations
 
